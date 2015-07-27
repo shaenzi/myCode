@@ -4,6 +4,8 @@
 %and import it...
 
 %% find ca imaging files (tiffs?)and load
+% not needed if done in ImageJ
+%{
 [imagingFile, imagingPath]=uigetfile('*.tif','select files from Ca imaging');
 cd(imagingPath)
 caFiles = dir('*.tif');
@@ -16,6 +18,7 @@ imageSequence(:,:,1) = I;
 for p = 2:nFrames
     imageSequence(:,:,p) = imread(caFileNames{p}); 
 end
+%}
 
 %% find ephys files and load (needs to be converted to mat in spike2)
 [ephysFile, ephysPath] = uigetfile('*.mat','select ephys file');
@@ -52,14 +55,28 @@ end
 %extract Ca trace for each cell i.e. mean change over all pixels in the
 %cell?
 
-%for now, select cells and export mean from fiji
-%paste into a variable called cells
+dotIndex = strfind(ephysFile,'.');
+currFile = ephysFile(1:dotIndex-1);
+noBGstring = sprintf('file %s no BG subtraction',currFile);
 
-%bg subtraction, bleaching correction, calculate delta F/F
+%for now, select cells and export mean from fiji; save as txtfile
+[fileNoBGcorrection, pathNoBGcorrection] = uigetfile('*.txt',noBGstring);
+cd(pathNoBGcorrection)
+dataNoBGcorrection = importdata(fileNoBGcorrection);
+cells = dataNoBGcorrection.data(:,2:end);
+sizeCells = size(cells);
+
+%with imageJ rolling ball BG subtraction
+BGstring = sprintf('file %s BG subtracted',currFile);
+[fileBGcorrection, pathBGcorrection] = uigetfile('*.txt',BGstring);
+cd(pathBGcorrection)
+dataBGcorrection = importdata(fileBGcorrection);
+cellsBGsubtracted = dataBGcorrection.data(:,2:end);
 
 %currently no bleaching correction, as I don't image long enough in the end
 
-nCells = input('nr of cells? '); %as the last column is bg
+nCells = sizeCells(1,2);
+nFrames = sizeCells(1,1);
 
 %bg subtraction
 %last column in cells is bg
@@ -71,7 +88,7 @@ for myN = 1:nrCells
 end
 %}
 
-nInitialDataPoints = 6;
+nInitialDataPoints = 10;
 
 %calculate df/f
 %take f to be the mean of the first 6 data points
@@ -81,19 +98,14 @@ for myN = 1:nCells
     cellsDeltaF(:,myN) = (cells(:,myN)-cellsF(1,myN))/cellsF(1,myN);
 end
 
-%bg subtracted in imagej with rolling ball algorithm, diameter 100pi
-cellsFBGsubtracted100pi = mean(cellsBGsubtracted100pi(1:nInitialDataPoints,:));
-cellsDeltaFBGsubtracted100pi = NaN(nFrames,nCells);
+%bg subtracted in imagej with rolling ball algorithm
+BGsubtraction = input('diameter of rolling ball BG subtraction: ');
+cellsFBGsubtracted = mean(cellsBGsubtracted(1:nInitialDataPoints,:));
+cellsDeltaFBGsubtracted = NaN(nFrames,nCells);
 for myN = 1:nCells
-    cellsDeltaFBGsubtracted100pi(:,myN) = (cellsBGsubtracted100pi(:,myN)-cellsFBGsubtracted100pi(1,myN))/cellsFBGsubtracted100pi(1,myN);
+    cellsDeltaFBGsubtracted(:,myN) = (cellsBGsubtracted(:,myN)-cellsFBGsubtracted(1,myN))/cellsFBGsubtracted(1,myN);
 end
 
-%bg subtracted in imagej with rolling ball algorithm, diameter 50pi
-cellsFBGsubtracted50pi = mean(cellsBGsubtracted50pi(1:nInitialDataPoints,:));
-cellsDeltaFBGsubtracted50pi = NaN(nFrames,nCells);
-for myN = 1:nCells
-    cellsDeltaFBGsubtracted50pi(:,myN) = (cellsBGsubtracted50pi(:,myN)-cellsFBGsubtracted50pi(1,myN))/cellsFBGsubtracted50pi(1,myN);
-end
 %% find beginning and end of imaging
 
 %sampling rate check
@@ -110,6 +122,8 @@ end
 imagingStart = imagingIndex(1);
 imagingEnd = imagingIndex(end);
 imagingRange = (imagingEnd - imagingStart); %in ephys sampling time
+
+fprintf('imaging starts at %d and ends at %d\n',imagingStart, imagingEnd)
 
 %% sync to sine
 %the sync of the vestibular stimulation does not give me the actual
@@ -139,11 +153,24 @@ mySine = sin(2*pi*0.5/10000*sineTime); %this assumes that there are 4 cycles wit
 %the stim frequency from the zero crossings
 stimSine = zeros(1,length(sync1.values));
 fprintf('current file: %s\n',ephysFile)
-currentAmp = input('what current amplitude was used? ');
-stimSine(zeroCrossingIndices(1):zeroCrossingIndices(end)-1) = mySine.*currentAmp;
+currentAmpGalvStim = input('current amplitude for galv stim? ');
+stimSine(zeroCrossingIndices(1):zeroCrossingIndices(end)-1) = mySine.*currentAmpGalvStim;
 %figure; plot(stimsine)
 
-%% plot ephys, stim and Ca imaging traces together
+%also add the swim stim into the same trace
+currentAmpSwimStim = input('current amplitude for swim stim? ');
+maxSync2 = max(sync2.values);
+normFactor = currentAmpSwimStim/maxSync2;
+sync2Norm = sync2.values.*normFactor;
+
+%% plot to compare BG subtraction vs no BG subtraction
+
+figure;
+plot(cellsDeltaF)
+hold on
+plot(cellsDeltaFBGsubtracted,':')
+
+%% plot ephys, stim and Ca imaging traces together - BG subtracted and no BG subtracted
 
 %timing!
 %for v root and stim, simply convert ephys time to actual time
@@ -155,27 +182,70 @@ ephysTime = ephysTime*vroot.interval;
 myInterval = imagingRange*imaging.interval/nFrames; %in seconds
 imagingTime = myInterval:myInterval:(nFrames)*myInterval; %start after one interval only, as it takes that long to get the first frame!
 
-
+%figure with BG subtracted cells
 figure;
 subplot(3,1,1)
-%ca imaging traces
-plot(imagingTime,cellsDeltaFBGsubtracted100pi)
-set(gca,'Box','off')
-ylabel('\delta F/F')
-
-subplot(3,1,2)
 %stim
 plot(ephysTime,stimSine(imagingStart:imagingEnd-1))
+if any(sync2Norm) == 1 %checks for nonzero elements - only plot if there were some
+    hold on
+    plot(ephysTime,sync2Norm(imagingStart:imagingEnd-1),'k')
+end
 set(gca,'Box','off')
-ylabel('galv stim')
+ylabel('stim (\muA)')
+axis([0 max(ephysTime) min(stimSine) max(max(stimSine),max(sync2Norm))])
+title('BG subtracted')
+
+subplot(3,1,2)
+%ca imaging traces
+plot(imagingTime,cellsDeltaFBGsubtracted)
+set(gca,'Box','off')
+ylabel('\delta F/F')
+axis([0 max(imagingTime) min(min(cellsDeltaFBGsubtracted)) max(max(cellsDeltaFBGsubtracted))]) %min and max over all cells
 
 subplot(3,1,3)
 %v root
 plot(ephysTime,vroot.values(imagingStart:imagingEnd-1))
 set(gca,'Box','off')
 xlabel('Time (s)')
-ylabel('vr')
+ylabel('vr (V)')
+axis([0 max(ephysTime) -Inf Inf])
+
+%figure with no bg subtraction
+figure;
+subplot(3,1,1)
+%stim
+plot(ephysTime,stimSine(imagingStart:imagingEnd-1))
+if any(sync2Norm) == 1 %checks for nonzero elements - only plot if there were some
+    hold on
+    plot(ephysTime,sync2Norm(imagingStart:imagingEnd-1),'k')
+end
+set(gca,'Box','off')
+ylabel('stim (\muA)')
+axis([0 max(ephysTime) min(stimSine) max(max(stimSine),max(sync2Norm))])
+title('no BG subtraction')
+
+subplot(3,1,2)
+%ca imaging traces
+plot(imagingTime,cellsDeltaF)
+set(gca,'Box','off')
+ylabel('\delta F/F')
+axis([0 max(imagingTime) min(min(cellsDeltaF)) max(max(cellsDeltaF))]) %min and max over all cells
+
+subplot(3,1,3)
+%v root
+plot(ephysTime,vroot.values(imagingStart:imagingEnd-1))
+set(gca,'Box','off')
+xlabel('Time (s)')
+ylabel('vr (V)')
+axis([0 max(ephysTime) -Inf Inf])
 
 %% find when animal is swimming
 %... tricky. manual might be easiest to start
 %with... later maybe find beginning of rhythmic bursts??
+
+%% save
+cd(pathNoBGcorrection) %this should be the appropriate analysis folder
+dotIndex = strfind(ephysFile,'.');
+tempFN = strcat(ephysFile(1:dotIndex-1),'_prelimAnalysis.mat');
+save(tempFN)
