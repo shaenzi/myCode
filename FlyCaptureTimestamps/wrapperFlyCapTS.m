@@ -17,11 +17,14 @@ mov = struct('cdata',zeros(vidHeight,vidWidth,1,'uint8'),...
     'colormap',[]);
 
 disp('reading video data...')
+tic
 k = 1;
 while hasFrame(vidObj)
     mov(k).cdata = readFrame(vidObj);
     k = k+1;
 end
+fprintf('reading the video data took %.2f seconds\n',toc)
+
 
 %make matrix with first 4 pixels in every frame
 nrOfFrames = length(mov);
@@ -34,8 +37,10 @@ end
 disp('calculating timestamps')
 TSsec = readFlyCapTS(TSvaluesPixel);
 
-longFrames = length(find(diff(TSsec)>0.005005))/nrOfFrames;
-fprintf('proportion of frames with dt > 0.005005: %.5f\n',longFrames)
+nLongFrames = length(find(diff(TSsec)>0.00505));
+proportionLongFrames = nLongFrames/nrOfFrames;
+fprintf('number of long frames with dt > 5.05ms: %d\n',nLongFrames)
+fprintf('proportion of frames with dt > 5.05ms: %.5f\n',proportionLongFrames)
 
 %plot time between frames
 figure; plot(diff(TSsec),'k.')
