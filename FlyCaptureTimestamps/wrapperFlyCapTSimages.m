@@ -15,6 +15,9 @@ tic
 for myN = 1:nrOfFrames
     currentImage = imread(myPics(myN,:));
     TSvaluesPixel(myN,:) = uint8(currentImage(1,1:4));
+    if mod(myN, 100) == 0
+        fprintf('at frame %i\n', myN)
+    end
 end
 fprintf('reading the images took %.2f seconds\n',toc)
 

@@ -10,7 +10,8 @@ if isa(TSvaluesPixel,'uint8') == 0
 end
 
 %general stuff, initialise variables
-nrOfFrames = length(TSvaluesPixel);
+sizePixelArray = size(TSvaluesPixel);
+nrOfFrames = sizePixelArray(1);
 TSvalues32 = uint32(NaN(nrOfFrames,1));
 nrSeconds = NaN(nrOfFrames,1);
 cycleCountIntermediate = uint32(NaN(nrOfFrames,1));
